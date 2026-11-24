@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -24,7 +23,6 @@ import {
   Send,
   Filter,
   Loader2,
-  Clock,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react'
@@ -32,11 +30,37 @@ import toast from 'react-hot-toast'
 import { EmptyState } from '@/components/common/EmptyState'
 import { SafeMarkdown } from '@/components/common/SafeMarkdown'
 import { sanitizeMarkdown } from '@/utils/sanitize'
+import {
+  ComplaintTicket,
+  ComplaintProgress,
+  ElapsedTime,
+  ComplaintShareButton,
+} from '@/components/common/ComplaintTicket'
 
 export default function CommunityFeed() {
   const { user } = useAuth()
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const navigate = useNavigate()
+
+  const handleShareComplaint = async (issueId) => {
+    const url = new URL(
+      `/report/${encodeURIComponent(issueId)}`,
+      window.location.origin
+    ).href
+
+    try {
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ url })
+      } else {
+        await navigator.clipboard.writeText(url)
+        toast.success(t('complaintLinkCopied'))
+      }
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        toast.error(t('failedShareComplaint'))
+      }
+    }
+  }
 
   const [complaints, setComplaints] = useState([])
   const [loading, setLoading] = useState(true)
@@ -245,6 +269,13 @@ export default function CommunityFeed() {
     'Merged - Duplicate': 'statusMerged',
   }
 
+  const translatedPriorities = {
+    low: 'priorityLow',
+    medium: 'priorityMedium',
+    high: 'priorityHigh',
+    critical: 'priorityCritical',
+  }
+
   return (
     <div className="space-y-6">
       {/* Controls Bar */}
@@ -274,7 +305,7 @@ export default function CommunityFeed() {
             {t('sortBy')}:
           </span>
 
-          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:border-gray-700 dark:bg-gray-800">
+          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 dark:bg-gray-800 dark:border-gray-700">
             <button
               onClick={() => setSortBy('recent')}
               className={`px-3 py-1 text-xs font-semibold rounded-md transition ${
@@ -342,17 +373,34 @@ export default function CommunityFeed() {
             const isCommentsOpen = !!openComments[issue.id]
             const commentsList = commentsData[issue.id] || []
 
+            const normalizedPriority = String(
+              issue.priority || ''
+            ).trim().toLowerCase()
+
+            const priorityKey = Object.hasOwn(
+              translatedPriorities,
+              normalizedPriority
+            )
+              ? translatedPriorities[normalizedPriority]
+              : undefined
+
             return (
-              <div
+              <ComplaintTicket
                 key={issue.id}
-                className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden hover:border-gray-300 transition dark:bg-gray-900 dark:border-gray-800 dark:hover:border-gray-700"
+                complaint={issue}
+                priorityLabel={
+                  priorityKey ? t(priorityKey) : undefined
+                }
               >
-                <div className="p-5 flex gap-4">
+                <div className="p-4 sm:p-5 flex gap-3 sm:gap-4">
                   {/* Upvote Column */}
-                  <div className="flex flex-col items-center">
+                  <div className="flex flex-col items-center shrink-0">
                     <button
+                      type="button"
                       onClick={() => handleToggleUpvote(issue.id)}
-                      className={`flex flex-col items-center justify-center w-12 h-14 rounded-lg border transition ${
+                      aria-pressed={hasUpvoted}
+                      aria-label={`${hasUpvoted ? t('removeUpvote') : t('upvoteIssue')}: ${upvotesCount}`}
+                      className={`flex flex-col items-center justify-center w-12 h-14 rounded-lg border transition focus-visible:outline-2 focus-visible:outline-blue-600 ${
                         hasUpvoted
                           ? 'bg-blue-50 border-blue-300 text-blue-600 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-400'
                           : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700'
@@ -360,6 +408,7 @@ export default function CommunityFeed() {
                       title={hasUpvoted ? t('removeUpvote') : t('upvoteIssue')}
                     >
                       <ArrowBigUp
+                        aria-hidden="true"
                         className={`w-6 h-6 ${
                           hasUpvoted
                             ? 'fill-blue-600 dark:fill-blue-400'
@@ -374,7 +423,7 @@ export default function CommunityFeed() {
 
                   {/* Issue Content */}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap mb-1.5">
+                    <div className="flex items-center gap-2 flex-wrap mb-2">
                       {issue.category && (
                         <CategoryAvatar category={issue.category} size="xs" />
                       )}
@@ -396,22 +445,22 @@ export default function CommunityFeed() {
                         </span>
                       )}
 
-                      <span className="text-xs text-gray-400 flex items-center gap-1 ml-auto dark:text-gray-400">
-                        <Clock className="w-3 h-3" />
-                        {issue.createdAt?.toDate
-                          ? issue.createdAt.toDate().toLocaleDateString()
-                          : t('recent')}
-                      </span>
+                      <div className="ml-auto">
+                        <ElapsedTime
+                          createdAt={issue.createdAt}
+                          language={language}
+                        />
+                      </div>
                     </div>
 
-                    <h3 className="text-base font-semibold text-gray-900 mb-1 dark:text-gray-100">
+                    <h3 className="text-base font-semibold text-gray-900 mb-1 dark:text-gray-100 break-words">
                       {issue.title || issue.subject || t('civicIssue')}
                     </h3>
 
                     <SafeMarkdown
                       content={issue.description || t('noDescriptionProvided')}
                       as="div"
-                      className="text-sm text-gray-600 mb-3 whitespace-pre-line dark:text-gray-400"
+                      className="text-sm text-gray-600 mb-3 whitespace-pre-line break-words dark:text-gray-400"
                     />
 
                     {issue.location && (
@@ -423,22 +472,40 @@ export default function CommunityFeed() {
                       </p>
                     )}
 
-                    {/* Comments Toggle */}
-                    <button
-                      onClick={() => toggleComments(issue.id)}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-blue-600 transition dark:text-gray-400 dark:hover:text-blue-400"
-                    >
-                      <MessageSquare className="w-4 h-4" />
-                      <span>
-                        {commentsList.length} {t('comments')}
-                      </span>
+                    {['Pending', 'In Progress', 'Resolved'].includes(issue.status) && (
+                      <div className="mb-3">
+                        <ComplaintProgress
+                          status={issue.status}
+                          t={t}
+                        />
+                      </div>
+                    )}
 
-                      {isCommentsOpen ? (
-                        <ChevronUp className="w-3.5 h-3.5" />
-                      ) : (
-                        <ChevronDown className="w-3.5 h-3.5" />
-                      )}
-                    </button>
+                    <div className="flex flex-wrap items-center gap-3">
+                      {/* Comments Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => toggleComments(issue.id)}
+                        aria-expanded={isCommentsOpen}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500 hover:text-blue-600 transition focus-visible:outline-2 focus-visible:outline-blue-600 dark:text-gray-400 dark:hover:text-blue-400"
+                      >
+                        <MessageSquare className="w-4 h-4" aria-hidden="true" />
+                        <span>
+                          {commentsList.length} {t('comments')}
+                        </span>
+
+                        {isCommentsOpen ? (
+                          <ChevronUp className="w-3.5 h-3.5" aria-hidden="true" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+                        )}
+                      </button>
+
+                      <ComplaintShareButton
+                        onShare={() => handleShareComplaint(issue.id)}
+                        label={t('shareComplaint')}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -518,7 +585,7 @@ export default function CommunityFeed() {
                     </div>
                   </div>
                 )}
-              </div>
+              </ComplaintTicket>
             )
           })}
         </div>
