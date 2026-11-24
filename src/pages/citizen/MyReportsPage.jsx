@@ -1,4 +1,7 @@
-
+import {
+  getReportQueryCache,
+  setReportQueryCache,
+} from '@/utils/reportQueryCache'
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -79,57 +82,113 @@ export function MyReportsPage() {
   const [editAddress, setEditAddress] = useState('')
 
   const { savingEdit, saveEdit } = useComplaintEditSave()
-
-  useEffect(() => {
-    if (!user) {
-      console.log('MyReports: user is null, skipping query')
-      setLoading(false)
-      return
-    }
-
-    console.log('MyReports: fetching issues for uid:', user.uid)
-    setLoading(true)
+useEffect(() => {
+  if (!user) {
+    setComplaints([])
+    setLoading(false)
     setLoadError(false)
+    return
+  }
 
-    // No orderBy here: where + orderBy on another field needs a composite index,
-    // so the results are sorted on the client instead.
-    const q = query(
-      collection(db, 'issues'),
-      where('reportedBy', '==', user.uid)
-    )
+  let active = true
+  let receivedServerSnapshot = false
+  let hasDisplayedData = false
 
-    const unsubscribe = onSnapshot(
-      q,
-      { includeMetadataChanges: true },
-      (snapshot) => {
-        if (isUnconfirmedEmpty(snapshot)) {
-          if (!navigator.onLine) {
-            setLoadError(true)
-            setLoading(false)
-          }
-          return
-        }
+  setComplaints([])
+  setLoading(true)
+  setLoadError(false)
 
-        const list = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }))
-
-        console.log('MyReports: received', list.length, 'documents')
-        setComplaints(sortByCreatedAtDesc(list))
-        setLoadError(false)
-        setLoading(false)
-      },
-      (error) => {
-        console.error('MyReports Firestore error:', error)
-        setLoadError(true)
-        setLoading(false)
+  getReportQueryCache(user.uid)
+    .then((cachedReports) => {
+      if (
+        !active ||
+        receivedServerSnapshot ||
+        hasDisplayedData ||
+        !cachedReports
+      ) {
+        return
       }
-    )
 
-    return unsubscribe
-  }, [user, reloadKey])
+      hasDisplayedData = true
+      setComplaints(cachedReports)
+      setLoading(false)
+      setLoadError(false)
+    })
+    .catch((error) => {
+      console.warn('MyReports cache read failed:', error)
+    })
 
+  const q = query(
+    collection(db, 'issues'),
+    where('reportedBy', '==', user.uid)
+  )
+
+  const timeoutId = setTimeout(() => {
+    if (!active || receivedServerSnapshot) return
+
+    setLoading(false)
+
+    if (!hasDisplayedData) {
+      setLoadError(true)
+    }
+  }, 8000)
+
+  const unsubscribe = onSnapshot(
+    q,
+    { includeMetadataChanges: true },
+    (snapshot) => {
+      if (!active) return
+
+      if (!snapshot.metadata.fromCache) {
+        receivedServerSnapshot = true
+        clearTimeout(timeoutId)
+      }
+
+      if (isUnconfirmedEmpty(snapshot)) {
+        if (!navigator.onLine && !hasDisplayedData) {
+          setLoadError(true)
+          setLoading(false)
+        }
+        return
+      }
+
+      const list = sortByCreatedAtDesc(
+        snapshot.docs.map((document) => ({
+          id: document.id,
+          ...document.data(),
+        }))
+      )
+
+      hasDisplayedData = true
+      setComplaints(list)
+      setLoadError(false)
+      setLoading(false)
+
+      if (!snapshot.metadata.fromCache) {
+        setReportQueryCache(user.uid, list).catch((error) => {
+          console.warn('MyReports cache write failed:', error)
+        })
+      }
+    },
+    (error) => {
+      if (!active) return
+
+      console.error('MyReports Firestore error:', error)
+      clearTimeout(timeoutId)
+      setLoading(false)
+
+      if (!hasDisplayedData) {
+        setLoadError(true)
+      }
+    }
+  )
+
+  return () => {
+    active = false
+    clearTimeout(timeoutId)
+    unsubscribe()
+  }
+}, [user, reloadKey])
   const filtered = complaints.filter(
     (r) =>
       r.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
