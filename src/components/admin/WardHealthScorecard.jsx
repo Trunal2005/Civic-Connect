@@ -112,11 +112,16 @@ export function WardHealthScorecard({ complaints = [] }) {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1">
               {/* Time Window Filter */}
               <div>
-                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
+                <label
+                  htmlFor="filter-time-window"
+                  className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1"
+                >
                   Time Window
                 </label>
                 <select
+                  id="filter-time-window"
                   data-testid="filter-time-window"
+                  aria-label="Filter by time window"
                   value={timeWindow}
                   onChange={(e) => setTimeWindow(e.target.value)}
                   className="flex h-9 w-full rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs focus:border-primary-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
@@ -130,11 +135,16 @@ export function WardHealthScorecard({ complaints = [] }) {
 
               {/* Category Filter */}
               <div>
-                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
+                <label
+                  htmlFor="filter-category"
+                  className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1"
+                >
                   Infrastructure Category
                 </label>
                 <select
+                  id="filter-category"
                   data-testid="filter-category"
+                  aria-label="Filter by category"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
                   className="flex h-9 w-full rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs focus:border-primary-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
@@ -149,11 +159,16 @@ export function WardHealthScorecard({ complaints = [] }) {
 
               {/* Resolution Speed Filter */}
               <div>
-                <label className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1">
+                <label
+                  htmlFor="filter-resolution-speed"
+                  className="text-xs font-semibold text-gray-700 dark:text-gray-300 block mb-1"
+                >
                   Resolution Speed
                 </label>
                 <select
+                  id="filter-resolution-speed"
                   data-testid="filter-resolution-speed"
+                  aria-label="Filter by resolution speed"
                   value={resolutionSpeed}
                   onChange={(e) => setResolutionSpeed(e.target.value)}
                   className="flex h-9 w-full rounded-lg border border-gray-300 bg-white px-3 py-1 text-xs focus:border-primary-500 focus:outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
@@ -173,6 +188,8 @@ export function WardHealthScorecard({ complaints = [] }) {
                   type="button"
                   variant="ghost"
                   size="sm"
+                  data-testid="filter-reset-btn"
+                  aria-label="Reset analytics filters"
                   onClick={handleResetFilters}
                   className="h-9 text-xs gap-1 text-gray-600 dark:text-gray-400"
                 >
