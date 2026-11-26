@@ -35,6 +35,13 @@ export function ResolutionChatDrawer({
 
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const drawerRef = useRef(null)
+  const previousActiveElementRef = useRef(null)
+  const onCloseRef = useRef(onClose)
+
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
 
   const complaintId = complaint?.complaintId || complaint?.id || ''
   const isOfficerOrAdmin =
@@ -87,10 +94,125 @@ export function ResolutionChatDrawer({
     }
   }, [messages, isOpen])
 
-  // Focus input when opened
+  // Focus trap and Escape key listener helper
+  const getFocusableElements = () => {
+    if (!drawerRef.current) return []
+    const selector = [
+      'a[href]:not([tabindex="-1"])',
+      'area[href]:not([tabindex="-1"])',
+      'input:not([disabled]):not([type="hidden"]):not([tabindex="-1"])',
+      'select:not([disabled]):not([tabindex="-1"])',
+      'textarea:not([disabled]):not([tabindex="-1"])',
+      'button:not([disabled]):not([tabindex="-1"])',
+      'iframe:not([tabindex="-1"])',
+      '[tabindex]:not([tabindex="-1"])',
+      '[contentEditable=true]:not([tabindex="-1"])',
+    ].join(',')
+
+    const candidateElements = Array.from(drawerRef.current.querySelectorAll(selector))
+    return candidateElements.filter((el) => {
+      return (
+        !el.hasAttribute('disabled') &&
+        el.getAttribute('aria-hidden') !== 'true' &&
+        el.offsetParent !== null ||
+        // JSDOM might return offsetParent null if elements aren't visually rendered
+        (typeof el.checkVisibility === 'function' ? el.checkVisibility() : true)
+      )
+    })
+  }
+
+  // Handle Escape key and Tab focus trap
   useEffect(() => {
-    if (isOpen && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 150)
+    if (!isOpen) return
+
+    const handleGlobalKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        onCloseRef.current?.()
+        return
+      }
+
+      if (e.key === 'Tab') {
+        const focusable = getFocusableElements()
+        if (focusable.length === 0) {
+          e.preventDefault()
+          if (drawerRef.current && typeof drawerRef.current.focus === 'function') {
+            drawerRef.current.focus()
+          }
+          return
+        }
+
+        const firstElement = focusable[0]
+        const lastElement = focusable[focusable.length - 1]
+        const activeElement = document.activeElement
+
+        if (e.shiftKey) {
+          // Shift + Tab: reverse navigation
+          if (
+            activeElement === firstElement ||
+            !drawerRef.current?.contains(activeElement)
+          ) {
+            e.preventDefault()
+            lastElement.focus()
+          }
+        } else {
+          // Tab: forward navigation
+          if (
+            activeElement === lastElement ||
+            !drawerRef.current?.contains(activeElement)
+          ) {
+            e.preventDefault()
+            firstElement.focus()
+          }
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleGlobalKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown)
+    }
+  }, [isOpen])
+
+  // Initial focus management and focus restoration
+  useEffect(() => {
+    if (!isOpen) return
+
+    // Save active element before focus changes
+    previousActiveElementRef.current = document.activeElement
+
+    // Move focus inside drawer
+    const timer = setTimeout(() => {
+      if (!drawerRef.current) return
+
+      if (inputRef.current && !inputRef.current.disabled) {
+        inputRef.current.focus()
+      } else {
+        const focusable = getFocusableElements()
+        if (focusable.length > 0) {
+          focusable[0].focus()
+        } else if (drawerRef.current && typeof drawerRef.current.focus === 'function') {
+          drawerRef.current.focus()
+        }
+      }
+    }, 0)
+
+    return () => {
+      clearTimeout(timer)
+      const elementToRestore = previousActiveElementRef.current
+      if (
+        elementToRestore &&
+        typeof elementToRestore.focus === 'function' &&
+        document.contains(elementToRestore)
+      ) {
+        try {
+          elementToRestore.focus()
+        } catch {
+          // Ignore focus errors
+        }
+      }
+      previousActiveElementRef.current = null
     }
   }, [isOpen])
 
@@ -142,11 +264,13 @@ export function ResolutionChatDrawer({
 
   return (
     <div
+      ref={drawerRef}
+      tabIndex={-1}
       role="dialog"
       aria-modal="true"
       aria-label="Resolution Chat Channel"
       data-testid="resolution-chat-drawer"
-      className="fixed inset-0 z-50 overflow-hidden flex justify-end"
+      className="fixed inset-0 z-50 overflow-hidden flex justify-end focus:outline-none"
     >
       {/* Backdrop */}
       <div
@@ -186,7 +310,7 @@ export function ResolutionChatDrawer({
             size="icon"
             onClick={onClose}
             aria-label="Close resolution chat"
-            className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 shrink-0"
+            className="h-8 w-8 text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900"
           >
             <X className="h-4 w-4" />
           </Button>
