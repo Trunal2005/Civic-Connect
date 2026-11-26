@@ -23,6 +23,8 @@ export { auth, db, storage }
 export {
   validateComplaintPhoto,
   uploadComplaintPhoto,
+  validateProfilePhoto,
+  uploadProfilePhoto,
   uploadComplaintAudio,
   deleteStorageFile,
   deleteComplaintEvidence,

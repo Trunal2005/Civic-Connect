@@ -75,7 +75,7 @@ service cloud.firestore {
         let previous = resource.data;
         let changed = data.diff(previous).affectedKeys();
         return changed.hasOnly([
-                 'name', 'phone', 'address', 'updatedAt', 'fcmToken',
+                 'name', 'phone', 'address', 'photoURL', 'updatedAt', 'fcmToken',
                  'pushNotificationsEnabled', 'notificationPreferences'
                ]) &&
                // Identity and role authorization attributes are immutable.
@@ -85,6 +85,7 @@ service cloud.firestore {
                (!changed.hasAny(['name']) || isNonEmptyString(data.get('name', null), 100)) &&
                isOptionalString(data.get('phone', null), 20) &&
                isOptionalString(data.get('address', null), 300) &&
+               isOptionalString(data.get('photoURL', null), 2048) &&
                isOptionalString(data.get('fcmToken', null), 4096) &&
                data.get('pushNotificationsEnabled', false) is bool &&
                isValidNotificationPreferences(data.get('notificationPreferences', {}));

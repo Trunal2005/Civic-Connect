@@ -12,12 +12,13 @@ import { auth, db } from '@/firebase/services'
 
 const AuthContext = createContext(null)
 
-function formatFirebaseUser(firebaseUser, role) {
+function formatFirebaseUser(firebaseUser, role, photoURL = null) {
   return {
     uid: firebaseUser.uid,
     email: firebaseUser.email,
     name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
     role: role || 'citizen',
+    photoURL: photoURL || firebaseUser.photoURL || null,
   }
 }
 
@@ -25,13 +26,15 @@ function sessionChanged() {
   return Object.assign(new Error('The authentication session changed'), { code: 'auth/session-changed' })
 }
 
-async function readRole(firebaseUser, registration) {
+async function readProfileMeta(firebaseUser, registration) {
   // 1. Inspect cryptographically signed custom claims on the ID token first
   if (typeof firebaseUser.getIdTokenResult === 'function') {
     try {
       const tokenResult = await firebaseUser.getIdTokenResult()
       const claimRole = tokenResult?.claims?.role
-      if (claimRole) return claimRole
+      if (claimRole) {
+        return { role: claimRole, photoURL: firebaseUser.photoURL || null }
+      }
     } catch {
       // Ignore token read error and proceed to fallback
     }
@@ -43,13 +46,22 @@ async function readRole(firebaseUser, registration) {
     ? registration.firebaseUser === firebaseUser
     : registration.email === firebaseUser.email?.toLowerCase())) {
     const result = await registration.result.catch(() => null)
-    if (result?.firebaseUser === firebaseUser) return result.role
-    if (auth.currentUser !== firebaseUser) return undefined
+    if (result?.firebaseUser === firebaseUser) {
+      return { role: result.role, photoURL: firebaseUser.photoURL || null }
+    }
+    if (auth.currentUser !== firebaseUser) return { role: undefined, photoURL: null }
   }
 
   // Backward-compatible fallback for local emulator / transitional accounts
   const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
-  return userDoc.exists() ? userDoc.data().role : 'citizen'
+  if (!userDoc.exists()) {
+    return { role: 'citizen', photoURL: null }
+  }
+  const data = userDoc.data()
+  return {
+    role: data.role,
+    photoURL: data.photoURL || null,
+  }
 }
 
 export function AuthProvider({ children }) {
@@ -79,14 +91,16 @@ export function AuthProvider({ children }) {
     }
 
     session.profile = (async () => {
-      let role, failure
+      let role
+      let photoURL = null
+      let failure
       try {
-        role = await readRole(firebaseUser, active.registration)
+        ;({ role, photoURL } = await readProfileMeta(firebaseUser, active.registration))
       } catch (error) {
         failure = { error }
       }
       if (!isCurrent(active, session)) return null
-      const hydrated = formatFirebaseUser(firebaseUser, role)
+      const hydrated = formatFirebaseUser(firebaseUser, role, photoURL)
       setUser(hydrated)
       setLoading(false)
       setAuthInitialized(true)
@@ -173,21 +187,58 @@ export function AuthProvider({ children }) {
     }
   }, [startSession])
 
-  const updateUserProfile = useCallback(async ({ name, phone, address }) => {
+  const updateUserProfile = useCallback(async ({ name, phone, address, photoURL }) => {
     const active = lifetime.current
     const session = active?.session
     const current = auth.currentUser
     if (!current) throw new Error('Not signed in')
     if (!isCurrent(active, session)) throw sessionChanged()
-    // Only these fields are written, never role
-    await setDoc(
-      doc(db, 'users', current.uid),
-      { name, phone, address, updatedAt: serverTimestamp() },
-      { merge: true }
-    )
+
+    const firestoreUpdates = {
+      updatedAt: serverTimestamp(),
+    }
+    if (name !== undefined) firestoreUpdates.name = name
+    if (phone !== undefined) firestoreUpdates.phone = phone
+    if (address !== undefined) firestoreUpdates.address = address
+    if (photoURL !== undefined) firestoreUpdates.photoURL = photoURL
+
+    // Only allowed profile fields are written, never role
+    try {
+      await setDoc(
+        doc(db, 'users', current.uid),
+        firestoreUpdates,
+        { merge: true }
+      )
+    } catch (err) {
+      const isDevDataUrlFallback =
+        typeof photoURL === 'string' &&
+        photoURL.startsWith('data:') &&
+        import.meta.env.DEV &&
+        import.meta.env.MODE !== 'test' &&
+        import.meta.env.VITE_USE_EMULATORS !== 'true'
+      if (!isDevDataUrlFallback) throw err
+    }
     if (!isCurrent(active, session)) return
-    await updateProfile(current, { displayName: name })
-    if (isCurrent(active, session)) setUser(prev => prev ? { ...prev, name } : prev)
+
+    const authUpdates = {}
+    if (name !== undefined) authUpdates.displayName = name
+    if (photoURL !== undefined && !(typeof photoURL === 'string' && photoURL.startsWith('data:'))) {
+      authUpdates.photoURL = photoURL
+    }
+    if (Object.keys(authUpdates).length > 0) {
+      await updateProfile(current, authUpdates)
+    }
+    if (isCurrent(active, session)) {
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              ...(name !== undefined ? { name } : {}),
+              ...(photoURL !== undefined ? { photoURL } : {}),
+            }
+          : prev
+      )
+    }
   }, [isCurrent])
 
   const resetPassword = useCallback(async (email) => {

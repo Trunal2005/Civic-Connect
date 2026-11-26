@@ -6,7 +6,7 @@ import { db } from '@/firebase/services'
 import { useAuth } from '@/hooks/useAuth'
 import { useSpotlightSearch } from '@/contexts/SpotlightContext'
 import { ThemeToggle } from '@/components/common/ThemeToggle'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { useLanguage } from '@/contexts/LanguageContext'
 import {
@@ -150,15 +150,6 @@ export function Navbar({ onMenuClick }) {
 
     return unsub
   }, [user?.uid, user?.role])
-
-  const initials = user?.name
-    ? user.name
-        .split(' ')
-        .map((name) => name[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : 'U'
 
   const handleLogout = async () => {
     await logout()
@@ -440,10 +431,19 @@ export function Navbar({ onMenuClick }) {
           <Button
             variant="ghost"
             className="relative h-9 w-9 rounded-full p-0"
+            aria-label={user?.name || t('profile')}
           >
-            <Avatar className="h-9 w-9">
-              <AvatarFallback>{initials}</AvatarFallback>
-            </Avatar>
+            <UserAvatar
+              src={user?.photoURL}
+              name={user?.name}
+              alt={
+                user?.name
+                  ? `${user.name} ${t('profilePhotoAlt')}`
+                  : t('profilePhotoAlt')
+              }
+              className="h-9 w-9 ring-1 ring-gray-200 dark:ring-gray-700"
+              fallbackClassName="bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300 text-xs font-semibold"
+            />
           </Button>
         </DropdownMenuTrigger>
 

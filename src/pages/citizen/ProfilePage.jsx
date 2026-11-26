@@ -1,9 +1,10 @@
 
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Camera, Save, Loader2, BellRing, Trophy } from 'lucide-react'
 import { doc, getDoc } from 'firebase/firestore'
 import { db } from '@/firebase/services'
+import { validateProfilePhoto, uploadProfilePhoto } from '@/firebase/storage'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,7 +16,7 @@ import {
   CardTitle,
   CardDescription,
 } from '@/components/ui/card'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { UserAvatar } from '@/components/common/UserAvatar'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/hooks/useAuth'
 import {
@@ -77,8 +78,12 @@ export function ProfilePage() {
   const [email] = useState(user?.email || '')
   const [phone, setPhone] = useState('')
   const [address, setAddress] = useState('')
+  const [photoURL, setPhotoURL] = useState(user?.photoURL || '')
+  const [previewUrl, setPreviewUrl] = useState(null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const fileInputRef = useRef(null)
 
   const [permissionStatus, setPermissionStatus] = useState(() =>
     getPushPermissionStatus()
@@ -101,6 +106,25 @@ export function ProfilePage() {
     loading: gamificationLoading,
   } = useCivicGamification(user)
 
+  // Keep local photo state synced with AuthContext updates.
+  useEffect(() => {
+    setPhotoURL(user?.photoURL || '')
+  }, [user?.photoURL])
+
+  // Revoke temporary blob preview URLs on change/unmount.
+  useEffect(() => {
+    return () => {
+      if (
+        previewUrl &&
+        previewUrl.startsWith('blob:') &&
+        typeof URL !== 'undefined' &&
+        typeof URL.revokeObjectURL === 'function'
+      ) {
+        URL.revokeObjectURL(previewUrl)
+      }
+    }
+  }, [previewUrl])
+
   // Load the user's personal profile information.
   useEffect(() => {
     if (!user?.uid) {
@@ -119,6 +143,7 @@ export function ProfilePage() {
         if (data.name) setName(data.name)
         setPhone(data.phone || '')
         setAddress(data.address || '')
+        if (data.photoURL) setPhotoURL(data.photoURL)
       })
       .catch((err) => {
         console.error('Profile load error:', err)
@@ -246,14 +271,51 @@ export function ProfilePage() {
     }
   }
 
-  const initials = user?.name
-    ? user.name
-        .split(' ')
-        .map((n) => n[0])
-        .join('')
-        .toUpperCase()
-        .slice(0, 2)
-    : 'U'
+  const displayedPhotoUrl = previewUrl || photoURL || user?.photoURL || ''
+
+  const handlePhotoButtonClick = () => {
+    if (uploadingPhoto || loading) return
+    fileInputRef.current?.click()
+  }
+
+  const handlePhotoChange = async (e) => {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || uploadingPhoto) return
+
+    const validation = validateProfilePhoto(file)
+    if (!validation.valid) {
+      toast.error(validation.error)
+      return
+    }
+
+    if (!user?.uid) {
+      toast.error(t('profilePhotoUploadError'))
+      return
+    }
+
+    if (
+      typeof URL !== 'undefined' &&
+      typeof URL.createObjectURL === 'function'
+    ) {
+      setPreviewUrl(URL.createObjectURL(file))
+    }
+
+    setUploadingPhoto(true)
+
+    try {
+      const { downloadUrl } = await uploadProfilePhoto(file, user.uid)
+      await updateUserProfile({ photoURL: downloadUrl })
+      setPhotoURL(downloadUrl)
+      toast.success(t('profilePhotoUpdated'))
+    } catch (err) {
+      console.error('Profile photo upload error:', err)
+      toast.error(t('profilePhotoUploadError'))
+    } finally {
+      setUploadingPhoto(false)
+      setPreviewUrl(null)
+    }
+  }
 
   const handleSave = async (e) => {
     e.preventDefault()
@@ -304,29 +366,62 @@ export function ProfilePage() {
         {/* User Identity Header Card */}
         <Card>
           <CardContent className="p-6">
-            <div className="flex items-center gap-6">
-              <div className="relative">
-                <Avatar className="h-20 w-20">
-                  <AvatarFallback className="bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300 text-xl font-semibold">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
+            <div className="flex items-center gap-4 sm:gap-6">
+              <div className="relative shrink-0">
+                <UserAvatar
+                  src={displayedPhotoUrl}
+                  name={user?.name}
+                  alt={
+                    user?.name
+                      ? `${user.name} ${t('profilePhotoAlt')}`
+                      : t('profilePhotoAlt')
+                  }
+                  className="h-20 w-20 ring-1 ring-gray-200 dark:ring-gray-700"
+                  fallbackClassName="bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300 text-xl font-semibold"
+                />
+
+                {uploadingPhoto && (
+                  <div
+                    className="absolute inset-0 flex items-center justify-center rounded-full bg-black/40"
+                    aria-hidden="true"
+                  >
+                    <Loader2 className="h-5 w-5 animate-spin text-white" />
+                  </div>
+                )}
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  aria-label={t('profileUploadPhoto')}
+                  tabIndex={-1}
+                  onChange={handlePhotoChange}
+                  disabled={uploadingPhoto || loading}
+                  className="sr-only"
+                />
 
                 <button
                   type="button"
+                  onClick={handlePhotoButtonClick}
+                  disabled={uploadingPhoto || loading}
                   aria-label={t('profileUploadPhoto')}
-                  className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full bg-primary-600 text-white shadow-sm hover:bg-primary-700 transition-colors"
+                  aria-busy={uploadingPhoto}
+                  className="absolute -bottom-1 -right-1 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white bg-primary-600 text-white shadow-sm transition-colors hover:bg-primary-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600 disabled:cursor-not-allowed disabled:opacity-60 dark:border-gray-900"
                 >
-                  <Camera className="h-3.5 w-3.5" />
+                  {uploadingPhoto ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Camera className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
                 </button>
               </div>
 
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-semibold text-gray-900 dark:text-white">
                   {user?.name}
                 </h2>
 
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <p className="break-all text-sm text-gray-500 dark:text-gray-400 sm:break-normal sm:truncate">
                   {user?.email}
                 </p>
 
