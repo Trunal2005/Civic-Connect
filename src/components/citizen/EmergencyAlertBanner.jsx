@@ -100,7 +100,7 @@ export function EmergencyAlertBannerView({
             type="button"
             onClick={onDismiss}
             aria-label="Dismiss emergency alert"
-            className={`rounded-md p-1.5 transition ${style.dismiss}`}
+            className={`rounded-md p-1.5 transition ${style.dismiss} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-gray-900 dark:focus-visible:ring-white dark:focus-visible:ring-offset-gray-900`}
           >
             <X className="h-4 w-4" aria-hidden="true" />
           </button>

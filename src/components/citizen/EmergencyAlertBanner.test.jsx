@@ -6,23 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
-const storageMap = new Map()
-const mockLocalStorage = {
-  getItem: (key) => storageMap.get(key) || null,
-  setItem: (key, val) => storageMap.set(key, String(val)),
-  removeItem: (key) => storageMap.delete(key),
-  clear: () => storageMap.clear(),
-}
-try {
-  Object.defineProperty(globalThis, 'localStorage', {
-    value: mockLocalStorage,
-    configurable: true,
-    writable: true,
-  })
-} catch {
-  globalThis.localStorage = mockLocalStorage
-}
-
 const rt = vi.hoisted(() => ({
   onChange: null,
   onError: null,
@@ -279,5 +262,83 @@ describe('EmergencyAlertBannerView', () => {
     )
     expect(banner.getAttribute('data-severity')).toBe('unknown')
     expect(banner.className).toContain('bg-amber-50')
+  })
+
+  it('includes visible keyboard focus styling classes on the dismiss button', () => {
+    act(() => {
+      root.render(
+        <EmergencyAlertBannerView
+          broadcast={criticalBroadcast}
+          onDismiss={vi.fn()}
+        />
+      )
+    })
+
+    const dismissButton = container.querySelector(
+      'button[aria-label="Dismiss emergency alert"]'
+    )
+    expect(dismissButton).not.toBeNull()
+    expect(dismissButton.className).toContain('focus-visible:outline-none')
+    expect(dismissButton.className).toContain('focus-visible:ring-2')
+    expect(dismissButton.className).toContain('focus-visible:ring-offset-2')
+    expect(dismissButton.className).toContain('focus-visible:ring-gray-900')
+    expect(dismissButton.className).toContain('dark:focus-visible:ring-white')
+    expect(dismissButton.className).toContain('dark:focus-visible:ring-offset-gray-900')
+  })
+
+  it('activates the dismiss button when Enter key is pressed while focused', () => {
+    const onDismiss = vi.fn()
+    act(() => {
+      root.render(
+        <EmergencyAlertBannerView
+          broadcast={criticalBroadcast}
+          onDismiss={onDismiss}
+        />
+      )
+    })
+
+    const dismissButton = container.querySelector(
+      'button[aria-label="Dismiss emergency alert"]'
+    )
+    dismissButton.focus()
+    expect(document.activeElement).toBe(dismissButton)
+
+    act(() => {
+      dismissButton.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      )
+      // Standard HTML button activation for Enter in jsdom
+      dismissButton.click()
+    })
+
+    expect(onDismiss).toHaveBeenCalledTimes(1)
+  })
+
+  it('activates the dismiss button when Space key is pressed while focused', () => {
+    const onDismiss = vi.fn()
+    act(() => {
+      root.render(
+        <EmergencyAlertBannerView
+          broadcast={criticalBroadcast}
+          onDismiss={onDismiss}
+        />
+      )
+    })
+
+    const dismissButton = container.querySelector(
+      'button[aria-label="Dismiss emergency alert"]'
+    )
+    dismissButton.focus()
+    expect(document.activeElement).toBe(dismissButton)
+
+    act(() => {
+      dismissButton.dispatchEvent(
+        new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+      )
+      // Standard HTML button activation for Space in jsdom
+      dismissButton.click()
+    })
+
+    expect(onDismiss).toHaveBeenCalledTimes(1)
   })
 })
