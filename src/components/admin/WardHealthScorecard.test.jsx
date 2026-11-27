@@ -169,4 +169,181 @@ describe('WardHealthScorecard Component', () => {
 
     expect(container.textContent).toContain('Municipal Health Score')
   })
+
+  describe('Filter Toolbar Accessibility and Reset Functionality (Issue #307)', () => {
+    it('associates filter labels with select elements and provides descriptive aria-labels', async () => {
+      await act(async () => {
+        root.render(<WardHealthScorecard complaints={mockComplaints} />)
+      })
+
+      // Time Window
+      const timeSelect = container.querySelector('#filter-time-window')
+      const timeLabel = container.querySelector('label[for="filter-time-window"]')
+      expect(timeSelect).not.toBeNull()
+      expect(timeLabel).not.toBeNull()
+      expect(timeSelect.getAttribute('data-testid')).toBe('filter-time-window')
+      expect(timeSelect.getAttribute('aria-label')).toBe('Filter by time window')
+
+      // Category
+      const categorySelect = container.querySelector('#filter-category')
+      const categoryLabel = container.querySelector('label[for="filter-category"]')
+      expect(categorySelect).not.toBeNull()
+      expect(categoryLabel).not.toBeNull()
+      expect(categorySelect.getAttribute('data-testid')).toBe('filter-category')
+      expect(categorySelect.getAttribute('aria-label')).toBe('Filter by category')
+
+      // Resolution Speed
+      const speedSelect = container.querySelector('#filter-resolution-speed')
+      const speedLabel = container.querySelector('label[for="filter-resolution-speed"]')
+      expect(speedSelect).not.toBeNull()
+      expect(speedLabel).not.toBeNull()
+      expect(speedSelect.getAttribute('data-testid')).toBe('filter-resolution-speed')
+      expect(speedSelect.getAttribute('aria-label')).toBe('Filter by resolution speed')
+    })
+
+    it('keeps the Reset button hidden when all filters are at their default values', async () => {
+      await act(async () => {
+        root.render(<WardHealthScorecard complaints={mockComplaints} />)
+      })
+
+      const timeSelect = container.querySelector('#filter-time-window')
+      const categorySelect = container.querySelector('#filter-category')
+      const speedSelect = container.querySelector('#filter-resolution-speed')
+
+      // Reset filters to defaults: all, All, all
+      await act(async () => {
+        const timeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        timeSetter.call(timeSelect, 'all')
+        timeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+
+        const catSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        catSetter.call(categorySelect, 'All')
+        categorySelect.dispatchEvent(new Event('change', { bubbles: true }))
+
+        const speedSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        speedSetter.call(speedSelect, 'all')
+        speedSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+
+      expect(timeSelect.value).toBe('all')
+      expect(categorySelect.value).toBe('All')
+      expect(speedSelect.value).toBe('all')
+
+      const resetBtn = container.querySelector('[data-testid="filter-reset-btn"]')
+      expect(resetBtn).toBeNull()
+    })
+
+    it('displays the Reset button when any filter is changed from its default value', async () => {
+      await act(async () => {
+        root.render(<WardHealthScorecard complaints={mockComplaints} />)
+      })
+
+      const timeSelect = container.querySelector('#filter-time-window')
+      const categorySelect = container.querySelector('#filter-category')
+      const speedSelect = container.querySelector('#filter-resolution-speed')
+
+      // 1. Change time window only (from 'all' default)
+      await act(async () => {
+        const timeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        timeSetter.call(timeSelect, 'all')
+        timeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      expect(container.querySelector('[data-testid="filter-reset-btn"]')).toBeNull()
+
+      await act(async () => {
+        const timeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        timeSetter.call(timeSelect, '30')
+        timeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      expect(container.querySelector('[data-testid="filter-reset-btn"]')).not.toBeNull()
+
+      // Reset time window back to 'all'
+      await act(async () => {
+        const timeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        timeSetter.call(timeSelect, 'all')
+        timeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      expect(container.querySelector('[data-testid="filter-reset-btn"]')).toBeNull()
+
+      // 2. Change category only
+      await act(async () => {
+        const catSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        catSetter.call(categorySelect, 'Water Leakage')
+        categorySelect.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      expect(container.querySelector('[data-testid="filter-reset-btn"]')).not.toBeNull()
+
+      // Reset category back to 'All'
+      await act(async () => {
+        const catSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        catSetter.call(categorySelect, 'All')
+        categorySelect.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      expect(container.querySelector('[data-testid="filter-reset-btn"]')).toBeNull()
+
+      // 3. Change resolution speed only
+      await act(async () => {
+        const speedSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        speedSetter.call(speedSelect, 'fast')
+        speedSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+      expect(container.querySelector('[data-testid="filter-reset-btn"]')).not.toBeNull()
+    })
+
+    it('restores all filters to defaults and hides the Reset button upon clicking Reset', async () => {
+      await act(async () => {
+        root.render(<WardHealthScorecard complaints={mockComplaints} />)
+      })
+
+      const timeSelect = container.querySelector('#filter-time-window')
+      const categorySelect = container.querySelector('#filter-category')
+      const speedSelect = container.querySelector('#filter-resolution-speed')
+
+      // Change all three to non-defaults
+      await act(async () => {
+        const timeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        timeSetter.call(timeSelect, '365')
+        timeSelect.dispatchEvent(new Event('change', { bubbles: true }))
+
+        const catSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        catSetter.call(categorySelect, 'Water Leakage')
+        categorySelect.dispatchEvent(new Event('change', { bubbles: true }))
+
+        const speedSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set
+        speedSetter.call(speedSelect, 'slow')
+        speedSelect.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+
+      expect(timeSelect.value).toBe('365')
+      expect(categorySelect.value).toBe('Water Leakage')
+      expect(speedSelect.value).toBe('slow')
+
+      const resetBtn = container.querySelector('[data-testid="filter-reset-btn"]')
+      expect(resetBtn).not.toBeNull()
+
+      await act(async () => {
+        resetBtn.click()
+      })
+
+      // Verify all restored to defaults
+      expect(timeSelect.value).toBe('all')
+      expect(categorySelect.value).toBe('All')
+      expect(speedSelect.value).toBe('all')
+
+      // Verify Reset button disappears
+      expect(container.querySelector('[data-testid="filter-reset-btn"]')).toBeNull()
+    })
+
+    it('verifies accessibility attributes on the Reset button', async () => {
+      await act(async () => {
+        root.render(<WardHealthScorecard complaints={mockComplaints} />)
+      })
+
+      // Default timeWindow is '90', so Reset button is visible initially
+      const resetBtn = container.querySelector('[data-testid="filter-reset-btn"]')
+      expect(resetBtn).not.toBeNull()
+      expect(resetBtn.getAttribute('aria-label')).toBe('Reset analytics filters')
+      expect(resetBtn.getAttribute('type')).toBe('button')
+    })
+  })
 })
