@@ -268,6 +268,7 @@ cp .env.example .env
 ```
 
 Open `.env` in your code editor and configure the required Firebase environment variables.
+**For Dev Sandbox Firebase keys , refer to the Discussions tab of this repository , you will find required API Keys there.**
 
 **Important:**
 - Make sure you have the required Firebase configuration.
