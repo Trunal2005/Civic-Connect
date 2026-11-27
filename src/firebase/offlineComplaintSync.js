@@ -7,7 +7,6 @@ import { allocateComplaintId } from './complaintId'
 import { addComplaintEventToBatch } from './complaintEvents'
 import { addNotificationToBatch } from './notifications'
 import { uploadComplaintPhoto, uploadComplaintAudio, deleteComplaintEvidence } from './storage'
-import { findWardForCoordinates } from '@/utils/geo'
 import { getWardById } from '@/utils/wardBoundaries'
 import { resolveJurisdictionRouting } from './wardRouting'
 

@@ -3,7 +3,6 @@ import {
   resolveJurisdictionRouting,
   rerouteComplaintWard,
   getDesignatedDepartment,
-  CATEGORY_DEPARTMENT_ROUTING,
   DEFAULT_MUNICIPAL_DEPARTMENT,
 } from './wardRouting'
 
