@@ -331,7 +331,22 @@ describe('Firestore Security Rules (Issue #20 Hardening)', () => {
           name: 'Alice Updated',
           phone: '+919876543210',
           address: '42 Civic Ave',
+          photoURL: 'https://storage.googleapis.com/demo/profile-photos/citizen-alice/avatar.png',
           updatedAt: serverTimestamp(),
+        })
+      )
+    })
+
+    it('DENIES non-string or oversized photoURL updates on profile', async () => {
+      const db = alice()
+      await assertFails(
+        updateDoc(doc(db, 'users', 'citizen-alice'), {
+          photoURL: 12345,
+        })
+      )
+      await assertFails(
+        updateDoc(doc(db, 'users', 'citizen-alice'), {
+          photoURL: 'https://example.com/' + 'a'.repeat(2100),
         })
       )
     })

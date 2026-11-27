@@ -278,4 +278,55 @@ describe('Storage Security Rules (Issue #254 Comprehensive Suite)', () => {
       await assertFails(uploadBytes(arbitraryRef, jpegData, { contentType: 'image/jpeg' }))
     })
   })
+
+  describe('Profile Photos (Max 2 MB, PNG/JPEG/WebP, Owner Isolation)', () => {
+    const webpData = new Uint8Array([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50])
+    const PROFILE_MAX_BYTES = 2 * 1024 * 1024
+
+    it('allows owner to upload PNG, JPEG, and WebP profile photos up to 2 MB', async () => {
+      await assertSucceeds(
+        uploadBytes(ref(alice(), 'profile-photos/citizen-alice/avatar.png'), pngData, {
+          contentType: 'image/png',
+        })
+      )
+      await assertSucceeds(
+        uploadBytes(ref(alice(), 'profile-photos/citizen-alice/avatar.jpg'), jpegData, {
+          contentType: 'image/jpeg',
+        })
+      )
+      await assertSucceeds(
+        uploadBytes(ref(alice(), 'profile-photos/citizen-alice/avatar.webp'), webpData, {
+          contentType: 'image/webp',
+        })
+      )
+    })
+
+    it('DENIES uploading profile photo over 2 MB or unsupported MIME type', async () => {
+      const oversized = makeSizedBuffer(PROFILE_MAX_BYTES + 1)
+      await assertFails(
+        uploadBytes(ref(alice(), 'profile-photos/citizen-alice/oversized.jpg'), oversized, {
+          contentType: 'image/jpeg',
+        })
+      )
+      await assertFails(
+        uploadBytes(ref(alice(), 'profile-photos/citizen-alice/bad.gif'), new Uint8Array([0x47, 0x49, 0x46]), {
+          contentType: 'image/gif',
+        })
+      )
+    })
+
+    it('DENIES uploading or deleting another users profile photo', async () => {
+      await assertFails(
+        uploadBytes(ref(bob(), 'profile-photos/citizen-alice/spoof.png'), pngData, {
+          contentType: 'image/png',
+        })
+      )
+
+      const aliceRef = ref(alice(), 'profile-photos/citizen-alice/avatar.png')
+      await assertSucceeds(uploadBytes(aliceRef, pngData, { contentType: 'image/png' }))
+
+      await assertFails(deleteObject(ref(bob(), 'profile-photos/citizen-alice/avatar.png')))
+      await assertSucceeds(deleteObject(aliceRef))
+    })
+  })
 })

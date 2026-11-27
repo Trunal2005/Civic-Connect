@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   validateComplaintPhoto,
+  validateProfilePhoto,
   sanitizeFilename,
   uploadComplaintPhoto,
+  uploadProfilePhoto,
   deleteStorageFile,
   deleteComplaintEvidence,
   MAX_PHOTO_SIZE_BYTES,
+  MAX_PROFILE_PHOTO_SIZE_BYTES,
 } from './storage'
 
 vi.mock('./config', () => ({
@@ -218,6 +221,71 @@ describe('Firebase Storage Helper', () => {
       expect(await deleteComplaintEvidence([])).toEqual([])
       expect(await deleteComplaintEvidence(null)).toEqual([])
       expect(await deleteComplaintEvidence(undefined)).toEqual([])
+    })
+  })
+
+  describe('validateProfilePhoto & uploadProfilePhoto', () => {
+    it('accepts valid PNG, JPEG, and WebP images within 2MB', () => {
+      const png = new File(['png-bytes'], 'avatar.png', { type: 'image/png' })
+      const jpg = new File(['jpg-bytes'], 'avatar.jpg', { type: 'image/jpeg' })
+      const webp = new File(['webp-bytes'], 'avatar.webp', { type: 'image/webp' })
+
+      expect(validateProfilePhoto(png)).toEqual({ valid: true })
+      expect(validateProfilePhoto(jpg)).toEqual({ valid: true })
+      expect(validateProfilePhoto(webp)).toEqual({ valid: true })
+    })
+
+    it('rejects empty files, unsupported types, and files exceeding 2MB', () => {
+      const empty = new File([], 'empty.png', { type: 'image/png' })
+      expect(validateProfilePhoto(empty).valid).toBe(false)
+
+      const gif = new File(['GIF89a'], 'anim.gif', { type: 'image/gif' })
+      expect(validateProfilePhoto(gif)).toEqual({
+        valid: false,
+        error: 'Invalid file format. Only PNG, JPEG, and WebP images are supported.',
+      })
+
+      const oversized = new File(
+        [new Uint8Array(MAX_PROFILE_PHOTO_SIZE_BYTES + 1)],
+        'large.webp',
+        { type: 'image/webp' }
+      )
+      expect(validateProfilePhoto(oversized)).toEqual({
+        valid: false,
+        error: 'File size exceeds 2MB limit. Please select a smaller photo.',
+      })
+    })
+
+    it('uploads valid profile photo to profile-photos/{userId}/ path', async () => {
+      const { ref, uploadBytes, getDownloadURL } = await import('firebase/storage')
+      const fakeStorage = {}
+      const file = new File(['webp-bytes'], 'my avatar.webp', { type: 'image/webp' })
+
+      const result = await uploadProfilePhoto(file, 'user-123', fakeStorage)
+
+      expect(ref).toHaveBeenCalledWith(
+        fakeStorage,
+        expect.stringMatching(/^profile-photos\/user-123\/\d+-my_avatar\.webp$/)
+      )
+      expect(uploadBytes).toHaveBeenCalledWith(
+        expect.anything(),
+        file,
+        { contentType: 'image/webp' }
+      )
+      expect(getDownloadURL).toHaveBeenCalled()
+      expect(result.downloadUrl).toBe('https://storage.googleapis.com/test-bucket/photo.jpg')
+    })
+
+    it('throws error when userId is missing or file is invalid', async () => {
+      const file = new File(['png'], 'avatar.png', { type: 'image/png' })
+      await expect(uploadProfilePhoto(file, '')).rejects.toThrow(
+        'A valid user ID is required for profile photo upload.'
+      )
+
+      const invalid = new File(['svg'], 'bad.svg', { type: 'image/svg+xml' })
+      await expect(uploadProfilePhoto(invalid, 'user-123')).rejects.toThrow(
+        'Invalid file format'
+      )
     })
   })
 })
