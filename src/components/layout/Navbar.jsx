@@ -1,5 +1,5 @@
 import { resolveCitizenComplaintDocumentId } from '@/firebase/complaintReferences'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { Menu, Bell, BellRing, Search } from 'lucide-react'
 import { collection, query, where, onSnapshot } from 'firebase/firestore'
 import { db } from '@/firebase/services'
@@ -28,6 +28,9 @@ import {
   showNativeNotification,
   getPushPermissionStatus,
   requestPushPermission,
+  applyAdminReceipts,
+  subscribeAdminReceipts,
+  markAdminNotificationsAsRead,
 } from '@/firebase/notifications'
 
 const icons = {
@@ -42,8 +45,12 @@ export function Navbar({ onMenuClick }) {
   const { openSearch } = useSpotlightSearch()
   const { language, setLanguage, t } = useLanguage()
 
-  const [unreadCount, setUnreadCount] = useState(0)
   const [recentNotifications, setRecentNotifications] = useState([])
+  const [adminReceipts, setAdminReceipts] = useState({})
+  const displayNotifications = useMemo(() => user?.role === 'admin'
+    ? applyAdminReceipts(recentNotifications, adminReceipts)
+    : recentNotifications, [user?.role, recentNotifications, adminReceipts])
+  const unreadCount = displayNotifications.filter((notification) => !notification.read).length
   const [permissionStatus, setPermissionStatus] = useState(() =>
     getPushPermissionStatus()
   )
@@ -81,7 +88,6 @@ export function Navbar({ onMenuClick }) {
         })
 
         setRecentNotifications(list)
-        setUnreadCount(list.filter((notification) => !notification.read).length)
 
         // The initial snapshot contains existing notifications.
         // Track them without showing alerts or playing sounds.
@@ -172,6 +178,14 @@ export function Navbar({ onMenuClick }) {
 
     // Preserve existing admin navigation.
     if (user?.role === 'admin') {
+      if (!notification.read) {
+        try {
+          await markAdminNotificationsAsRead([notification.id], user.uid)
+        } catch (error) {
+          console.error('Unable to mark admin notification as read:', error)
+          toast.error('Could not mark notification as read.')
+        }
+      }
       navigate(`/admin/reports/${notification.issueId}`)
       return
     }
@@ -369,12 +383,12 @@ export function Navbar({ onMenuClick }) {
 
           {/* Recent notifications preview */}
           <div className="max-h-80 divide-y divide-gray-100 overflow-y-auto dark:divide-gray-800">
-            {recentNotifications.length === 0 ? (
+            {displayNotifications.length === 0 ? (
               <div className="py-8 text-center text-xs text-gray-500 dark:text-gray-400">
                 {t('noNotifications')}
               </div>
             ) : (
-              recentNotifications.slice(0, 5).map((notification) => (
+              displayNotifications.slice(0, 5).map((notification) => (
                 <div
                   key={notification.id}
                   onClick={() =>

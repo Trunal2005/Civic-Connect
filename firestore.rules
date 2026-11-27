@@ -520,13 +520,14 @@ service cloud.firestore {
         let data = request.resource.data;
         return data.keys().hasOnly([
                  'recipientRole', 'recipientUid', 'senderUid', 'issueId', 'type',
-                 'title', 'message', 'read', 'createdAt'
+                 'title', 'message', 'read', 'createdAt', 'priority'
                ]) &&
                data.senderUid == request.auth.uid &&
                data.read == false &&
                data.createdAt == request.time &&
                data.recipientRole in ['admin', 'citizen'] &&
-               data.type in ['new_complaint', 'status_update', 'department_assigned'] &&
+               data.type in ['new_complaint', 'status_update', 'department_assigned', 'emergency', 'sla_escalation'] &&
+               data.get('priority', 'normal') in ['normal', 'high', 'critical'] &&
                isNonEmptyString(data.issueId, 40) &&
                isNonEmptyString(data.title, 200) &&
                isNonEmptyString(data.message, 1000) &&
@@ -547,17 +548,53 @@ service cloud.firestore {
       allow create: if isAuthenticated() &&
                     isValidNotificationCreate() &&
                     (isAdmin() ||
-                     (request.resource.data.recipientRole == 'admin' &&
-                      request.resource.data.get('recipientUid', null) == null));
+                    (request.resource.data.recipientRole == 'admin' &&
+                     request.resource.data.get('recipientUid', null) == null)) &&
+                    (isAdmin() ||
+                     (request.resource.data.get('priority', 'normal') == 'normal' &&
+                      request.resource.data.type in ['new_complaint', 'status_update', 'department_assigned']));
 
-      // Notification update strictly allows toggling read state on own notification
+      // Only direct recipients may mutate the shared notification. Admin-desk
+      // broadcasts keep their canonical document immutable after creation.
       allow update: if isAuthenticated() &&
                     request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read']) &&
                     request.resource.data.read is bool &&
-                    (resource.data.get('recipientUid', null) == request.auth.uid ||
-                     (resource.data.get('recipientRole', null) == 'admin' && isAdmin()));
+                    resource.data.get('recipientUid', null) == request.auth.uid;
 
       allow delete: if false;
+
+      match /receipts/{adminUid} {
+        function validReceipt() {
+          let data = request.resource.data;
+          return isAdmin() && adminUid == request.auth.uid &&
+            get(/databases/$(database)/documents/notifications/$(notificationId)).data.get('recipientRole', null) == 'admin' &&
+            data.keys().hasOnly(['adminUid', 'readAt', 'acknowledgedAt', 'acknowledgedBy']) &&
+            data.adminUid == adminUid &&
+            data.get('readAt', null) is timestamp &&
+            (data.get('acknowledgedAt', null) == null
+              ? !data.keys().hasAny(['acknowledgedBy'])
+              : (data.acknowledgedAt is timestamp && data.acknowledgedBy == adminUid));
+        }
+
+        allow get, list: if isAdmin() && adminUid == request.auth.uid;
+        allow create: if validReceipt() &&
+          request.resource.data.readAt == request.time &&
+          (request.resource.data.get('acknowledgedAt', null) == null ||
+           request.resource.data.acknowledgedAt == request.time);
+        allow update: if validReceipt() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt', 'acknowledgedAt', 'acknowledgedBy']) &&
+          (request.resource.data.readAt == resource.data.readAt || request.resource.data.readAt == request.time) &&
+          (request.resource.data.get('acknowledgedAt', null) == resource.data.get('acknowledgedAt', null) ||
+            (resource.data.get('acknowledgedAt', null) == null &&
+             request.resource.data.acknowledgedAt == request.time));
+        allow delete: if false;
+      }
+    }
+
+    // Collection-group reads let an administrator resolve all of their own
+    // receipts with one listener, without exposing another admin's state.
+    match /{path=**}/receipts/{adminUid} {
+      allow get, list: if isAdmin() && resource.data.adminUid == request.auth.uid;
     }
 
     // Emergency broadcasts (/broadcasts/{broadcastId})
