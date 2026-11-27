@@ -1,5 +1,5 @@
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell } from 'lucide-react'
 import {
@@ -7,8 +7,6 @@ import {
   query,
   where,
   onSnapshot,
-  doc,
-  writeBatch,
   getDocs,
   limit,
 } from 'firebase/firestore'
@@ -17,6 +15,13 @@ import { useLanguage } from '@/contexts/LanguageContext'
 import { PageHeader } from '@/components/common/PageHeader'
 import { Card, CardContent } from '@/components/ui/card'
 import { formatRelativeTime } from '@/utils/relativeTime'
+import { useAuth } from '@/hooks/useAuth'
+import {
+  applyAdminReceipts,
+  subscribeAdminReceipts,
+  markAdminNotificationsAsRead,
+  acknowledgeAdminNotification,
+} from '@/firebase/notifications'
 
 function sortByCreatedDesc(list) {
   return [...list].sort((a, b) => {
@@ -29,9 +34,44 @@ function sortByCreatedDesc(list) {
 export function AdminNotificationsPage() {
   const navigate = useNavigate()
   const { t } = useLanguage()
+  const { user } = useAuth()
 
-  const [notifications, setNotifications] = useState([])
+  const [rawNotifications, setRawNotifications] = useState([])
+  const [receipts, setReceipts] = useState({})
+  const [receiptsReady, setReceiptsReady] = useState(false)
   const [loading, setLoading] = useState(true)
+  const pendingReads = useRef(new Set())
+  const notifications = useMemo(() => applyAdminReceipts(rawNotifications, receipts), [rawNotifications, receipts])
+
+  useEffect(() => {
+    if (!user?.uid) return undefined
+    return subscribeAdminReceipts(user.uid, (nextReceipts) => {
+      setReceipts(nextReceipts)
+      setReceiptsReady(true)
+    }, (error) => console.error('Admin notification receipts error:', error))
+  }, [user?.uid])
+
+  useEffect(() => {
+    if (!user?.uid || !receiptsReady || loading) return
+    const unreadIds = notifications
+      .filter((n) => !n.read && !pendingReads.current.has(n.id))
+      .map((n) => n.id)
+    if (unreadIds.length === 0) return
+    unreadIds.forEach((id) => pendingReads.current.add(id))
+    markAdminNotificationsAsRead(unreadIds, user.uid).catch((error) => {
+      unreadIds.forEach((id) => pendingReads.current.delete(id))
+      console.error('Unable to mark admin notifications as read:', error)
+    })
+  }, [notifications, receiptsReady, loading, user?.uid])
+
+  const handleAcknowledge = async (event, notificationId) => {
+    event.stopPropagation()
+    try {
+      await acknowledgeAdminNotification(notificationId, user.uid)
+    } catch (error) {
+      console.error('Unable to acknowledge notification:', error)
+    }
+  }
 
   const handleNotificationClick = async (n) => {
     if (!n.issueId) return
@@ -70,22 +110,8 @@ export function AdminNotificationsPage() {
           ...doc.data(),
         }))
 
-        setNotifications(sortByCreatedDesc(list))
+        setRawNotifications(sortByCreatedDesc(list))
         setLoading(false)
-
-        const unread = list.filter((n) => !n.read)
-
-        if (unread.length > 0) {
-          const batch = writeBatch(db)
-
-          unread.forEach((n) => {
-            batch.update(doc(db, 'notifications', n.id), { read: true })
-          })
-
-          batch.commit().catch((err) =>
-            console.error('batch commit error:', err)
-          )
-        }
       },
       (error) => {
         console.error('AdminNotifications Firestore error:', error)
@@ -168,6 +194,17 @@ export function AdminNotificationsPage() {
                   <p className="text-xs font-mono text-primary-600 dark:text-primary-400 mt-1">
                     {n.issueId}
                   </p>
+                )}
+                {(['high', 'critical'].includes(n.priority) || ['emergency', 'sla_escalation'].includes(n.type)) && (
+                  n.acknowledgedAt ? (
+                    <p className="mt-2 text-xs text-green-700 dark:text-green-400">
+                      Acknowledged by you {formatRelativeTime(n.acknowledgedAt)}
+                    </p>
+                  ) : (
+                    <button type="button" onClick={(event) => handleAcknowledge(event, n.id)} className="mt-2 rounded-md bg-primary-600 px-3 py-1 text-xs font-medium text-white hover:bg-primary-700">
+                      Acknowledge
+                    </button>
+                  )
                 )}
               </div>
             </div>

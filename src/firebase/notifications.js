@@ -1,4 +1,7 @@
-import { collection, addDoc, doc, serverTimestamp, updateDoc, writeBatch } from 'firebase/firestore'
+import {
+  collection, collectionGroup, addDoc, doc, query, where, onSnapshot,
+  serverTimestamp, updateDoc, writeBatch, runTransaction,
+} from 'firebase/firestore'
 import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging'
 import app, { db } from './services'
 import firebaseConfig from './config'
@@ -11,6 +14,7 @@ function buildNotification({
   type,
   title,
   message,
+  priority,
 }) {
   return {
     recipientUid,
@@ -22,6 +26,7 @@ function buildNotification({
     message,
     read: false,
     createdAt: serverTimestamp(),
+    ...(priority ? { priority } : {}),
   }
 }
 
@@ -55,6 +60,67 @@ export async function markAllNotificationsAsRead(notificationIds, customDb = db)
       )
     )
   }
+}
+
+const receiptRef = (customDb, notificationId, adminUid) =>
+  doc(customDb, 'notifications', notificationId, 'receipts', adminUid)
+
+export function applyAdminReceipts(notifications, receipts) {
+  return notifications.map((notification) => {
+    const receipt = receipts[notification.id]
+    return {
+      ...notification,
+      read: Boolean(receipt?.readAt),
+      acknowledgedAt: receipt?.acknowledgedAt ?? null,
+      acknowledgedBy: receipt?.acknowledgedBy ?? null,
+    }
+  })
+}
+
+export function subscribeAdminReceipts(adminUid, onReceipts, onError, customDb = db) {
+  if (!adminUid) return () => {}
+  const receiptsQuery = query(
+    collectionGroup(customDb, 'receipts'),
+    where('adminUid', '==', adminUid)
+  )
+  return onSnapshot(receiptsQuery, (snapshot) => {
+    const receipts = {}
+    snapshot.docs.forEach((receipt) => {
+      const notificationId = receipt.ref.parent.parent?.id
+      if (notificationId) receipts[notificationId] = receipt.data()
+    })
+    onReceipts(receipts)
+  }, onError)
+}
+
+export async function markAdminNotificationsAsRead(notificationIds, adminUid, customDb = db) {
+  if (!adminUid || !Array.isArray(notificationIds) || notificationIds.length === 0) return
+  // Firestore batches permit at most 500 writes; leave room for future metadata.
+  for (let i = 0; i < notificationIds.length; i += 400) {
+    const batch = writeBatch(customDb)
+    notificationIds.slice(i, i + 400).forEach((id) => {
+      batch.set(receiptRef(customDb, id, adminUid), {
+        adminUid,
+        readAt: serverTimestamp(),
+      }, { merge: true })
+    })
+    await batch.commit()
+  }
+}
+
+export async function acknowledgeAdminNotification(notificationId, adminUid, customDb = db) {
+  if (!notificationId || !adminUid) return
+  const ref = receiptRef(customDb, notificationId, adminUid)
+  await runTransaction(customDb, async (transaction) => {
+    const existing = await transaction.get(ref)
+    if (existing.exists() && existing.data().acknowledgedAt) return
+    transaction.set(ref, {
+      adminUid,
+      readAt: serverTimestamp(),
+      acknowledgedAt: serverTimestamp(),
+      acknowledgedBy: adminUid,
+    }, { merge: true })
+  })
 }
 
 let messagingPromise = null

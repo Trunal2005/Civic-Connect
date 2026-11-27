@@ -10,14 +10,17 @@ import {
 import {
   Timestamp,
   collection,
+  collectionGroup,
   deleteDoc,
   doc,
   getDoc,
   getDocs,
+  query,
   runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore'
 
 const RULES = readFileSync(
@@ -105,6 +108,12 @@ async function seedData() {
     await setDoc(doc(db, 'users', 'admin-carol'), {
       name: 'Carol Admin',
       email: 'carol@civic.test',
+      role: 'admin',
+      createdAt: now,
+    })
+    await setDoc(doc(db, 'users', 'admin-dan'), {
+      name: 'Dan Admin',
+      email: 'dan@civic.test',
       role: 'admin',
       createdAt: now,
     })
@@ -207,6 +216,8 @@ describe('Firestore Security Rules (Issue #20 Hardening)', () => {
   const bob = () => testEnv.authenticatedContext('citizen-bob').firestore()
   const admin = () =>
     testEnv.authenticatedContext('admin-carol', { role: 'admin' }).firestore()
+  const otherAdmin = () =>
+    testEnv.authenticatedContext('admin-dan', { role: 'admin' }).firestore()
   const anon = () => testEnv.unauthenticatedContext().firestore()
 
   // -------------------------------------------------------------------------
@@ -770,6 +781,37 @@ describe('Firestore Security Rules (Issue #20 Hardening)', () => {
   // 6. Notifications
   // -------------------------------------------------------------------------
   describe('Notification Ownership & Permissions', () => {
+    it('isolates admin receipts and acknowledgments without changing the shared notification', async () => {
+      const carolReceipt = doc(admin(), 'notifications', 'notif-admin', 'receipts', 'admin-carol')
+      const danReceipt = doc(otherAdmin(), 'notifications', 'notif-admin', 'receipts', 'admin-dan')
+      await assertFails(updateDoc(doc(admin(), 'notifications', 'notif-admin'), { read: true }))
+      await Promise.all([
+        assertSucceeds(setDoc(carolReceipt, {
+          adminUid: 'admin-carol', readAt: serverTimestamp(),
+        })),
+        assertSucceeds(setDoc(danReceipt, {
+          adminUid: 'admin-dan', readAt: serverTimestamp(),
+          acknowledgedAt: serverTimestamp(), acknowledgedBy: 'admin-dan',
+        })),
+      ])
+      await assertFails(getDoc(doc(otherAdmin(), 'notifications', 'notif-admin', 'receipts', 'admin-carol')))
+      await assertFails(setDoc(doc(otherAdmin(), 'notifications', 'notif-admin', 'receipts', 'admin-carol'), {
+        adminUid: 'admin-carol', readAt: serverTimestamp(),
+      }))
+      await assertSucceeds(getDoc(carolReceipt))
+      await assertSucceeds(getDoc(danReceipt))
+      await assertSucceeds(updateDoc(carolReceipt, {
+        acknowledgedAt: serverTimestamp(), acknowledgedBy: 'admin-carol',
+      }))
+      await assertFails(updateDoc(danReceipt, { acknowledgedBy: 'admin-carol' }))
+      await assertFails(deleteDoc(danReceipt))
+      const shared = await assertSucceeds(getDoc(doc(admin(), 'notifications', 'notif-admin')))
+      if (shared.data().read !== false) throw new Error('Shared admin notification was mutated')
+      const ownReceipts = await assertSucceeds(getDocs(query(
+        collectionGroup(admin(), 'receipts'), where('adminUid', '==', 'admin-carol')
+      )))
+      if (ownReceipts.size !== 1) throw new Error('Incorrect admin receipt count')
+    })
     it('enforces owner/admin read access', async () => {
       await assertSucceeds(getDoc(doc(alice(), 'notifications', 'notif-alice')))
       await assertFails(getDoc(doc(bob(), 'notifications', 'notif-alice')))

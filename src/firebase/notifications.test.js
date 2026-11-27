@@ -4,6 +4,9 @@ import {
   addNotificationToBatch,
   markNotificationAsRead,
   markAllNotificationsAsRead,
+  applyAdminReceipts,
+  markAdminNotificationsAsRead,
+  acknowledgeAdminNotification,
   getPushPermissionStatus,
   requestPushPermission,
   showNativeNotification,
@@ -14,6 +17,7 @@ const firestoreState = vi.hoisted(() => ({
   docs: {},
   updates: [],
   adds: [],
+  sets: [],
 }))
 
 vi.mock('./services', () => ({
@@ -46,7 +50,21 @@ vi.mock('firebase/firestore', () => ({
       firestoreState.updates.push({ ref, data })
       firestoreState.docs[ref] = { ...(firestoreState.docs[ref] || {}), ...data }
     },
+    set: (ref, data, options) => {
+      firestoreState.sets.push({ ref, data, options })
+      firestoreState.docs[ref] = { ...(firestoreState.docs[ref] || {}), ...data }
+    },
     commit: async () => {},
+  }),
+  runTransaction: async (_db, callback) => callback({
+    get: async (ref) => ({
+      exists: () => Boolean(firestoreState.docs[ref]),
+      data: () => firestoreState.docs[ref],
+    }),
+    set: (ref, data, options) => {
+      firestoreState.sets.push({ ref, data, options })
+      firestoreState.docs[ref] = { ...(firestoreState.docs[ref] || {}), ...data }
+    },
   }),
   serverTimestamp: () => 'mock-timestamp',
 }))
@@ -70,6 +88,7 @@ describe('notifications service', () => {
     firestoreState.docs = {}
     firestoreState.updates = []
     firestoreState.adds = []
+    firestoreState.sets = []
     _resetMessagingInstanceForTests()
     messagingMock.isSupported.mockResolvedValue(true)
     messagingMock.getMessaging.mockReturnValue({ app: 'test-app' })
@@ -86,6 +105,26 @@ describe('notifications service', () => {
   })
 
   describe('createNotification & addNotificationToBatch', () => {
+    it('derives each admin read and acknowledgment state from that admin receipt', () => {
+      const notifications = [{ id: 'one', read: true }, { id: 'two', read: false }]
+      const carol = applyAdminReceipts(notifications, { two: {
+        readAt: 'today', acknowledgedAt: 'today', acknowledgedBy: 'admin-carol',
+      } })
+      const dan = applyAdminReceipts(notifications, {})
+      expect(carol.map((item) => item.read)).toEqual([false, true])
+      expect(dan.map((item) => item.read)).toEqual([false, false])
+      expect(carol[1].acknowledgedBy).toBe('admin-carol')
+    })
+
+    it('writes independent admin receipts and keeps acknowledgments idempotent', async () => {
+      await markAdminNotificationsAsRead(['one'], 'admin-carol')
+      await acknowledgeAdminNotification('one', 'admin-dan')
+      await acknowledgeAdminNotification('one', 'admin-dan')
+      expect(firestoreState.sets).toHaveLength(2)
+      expect(firestoreState.sets[0].ref).toBe('notifications/one/receipts/admin-carol')
+      expect(firestoreState.sets[1].ref).toBe('notifications/one/receipts/admin-dan')
+      expect(firestoreState.updates).toHaveLength(0)
+    })
     it('creates notification document in firestore with default unread state and timestamp', async () => {
       await createNotification({
         recipientUid: 'user-456',
