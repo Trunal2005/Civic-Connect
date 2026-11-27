@@ -439,3 +439,42 @@ it('supports refreshing claims using refreshClaims', async () => {
   expect(user.getIdTokenResult).toHaveBeenCalledWith(true)
   expect(context().user.role).toBe('admin')
 })
+
+it('persists photoURL in Firestore, Firebase Auth, and AuthContext state without overwriting name', async () => {
+  const user = account('a', 'User A')
+  getDoc.mockResolvedValueOnce(profile('citizen'))
+  await emit(user)
+
+  const photoURL = 'https://storage.googleapis.com/test-bucket/profile-photos/a/avatar.png'
+  await context().updateUserProfile({ photoURL })
+
+  expect(setDoc).toHaveBeenCalledWith(
+    'users/a',
+    { photoURL, updatedAt: 'server-time' },
+    { merge: true }
+  )
+  expect(updateProfile).toHaveBeenCalledWith(user, { photoURL })
+  expect(context().user).toMatchObject({
+    uid: 'a',
+    name: 'User A',
+    role: 'citizen',
+    photoURL,
+  })
+})
+
+it('hydrates photoURL from Firestore profile document on session load', async () => {
+  const user = account('a', 'User A')
+  const savedPhoto = 'https://storage.googleapis.com/test-bucket/profile-photos/a/saved.webp'
+  getDoc.mockResolvedValueOnce({
+    exists: () => true,
+    data: () => ({ role: 'citizen', photoURL: savedPhoto }),
+  })
+
+  await emit(user)
+  expect(context().user).toMatchObject({
+    uid: 'a',
+    name: 'User A',
+    role: 'citizen',
+    photoURL: savedPhoto,
+  })
+})

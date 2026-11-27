@@ -114,6 +114,25 @@ service firebase.storage {
       );
     }
 
+    // Citizen profile photos (CC-011)
+    // Path: profile-photos/{userId}/{fileName}
+    match /profile-photos/{userId}/{fileName} {
+      allow read: if isAuthenticated();
+
+      allow create: if isAuthenticated()
+        && request.auth.uid == userId
+        && request.resource.size > 0
+        && request.resource.size <= 2 * 1024 * 1024
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp)');
+
+      allow update: if false;
+
+      allow delete: if isAuthenticated() && (
+        request.auth.uid == userId ||
+        isAdmin()
+      );
+    }
+
     // Deny access to every other storage path
     match /{allPaths=**} {
       allow read, write: if false;

@@ -5,15 +5,18 @@ import { storage } from './services'
 export const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024 // 5MB
 export const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/jpg']
 
-/**
- * Validates a photo file for complaint attachment.
- * - Must be within 5MB limit
- * - Must be image/jpeg or image/png format
- *
- * @param {File} file
- * @returns {{ valid: boolean, error?: string }}
- */
-export function validateComplaintPhoto(file) {
+export const MAX_PROFILE_PHOTO_SIZE_BYTES = 2 * 1024 * 1024 // 2MB
+export const ALLOWED_PROFILE_PHOTO_TYPES = [
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+]
+
+function validateImageFile(
+  file,
+  { maxSizeBytes, allowedTypes, allowedExtensions, formatError, sizeError }
+) {
   if (!file) {
     return { valid: false, error: 'Please select a photo file.' }
   }
@@ -28,24 +31,61 @@ export function validateComplaintPhoto(file) {
   const normalizedType = (file.type || '').toLowerCase()
   const ext = (file.name || '').split('.').pop()?.toLowerCase()
   const isAllowedType =
-    ALLOWED_PHOTO_TYPES.includes(normalizedType) ||
-    (!normalizedType && ['jpg', 'jpeg', 'png'].includes(ext))
+    allowedTypes.includes(normalizedType) ||
+    (!normalizedType && allowedExtensions.includes(ext))
 
   if (!isAllowedType) {
     return {
       valid: false,
-      error: 'Invalid file format. Only JPG and PNG images are supported.',
+      error: formatError,
     }
   }
 
-  if (file.size > MAX_PHOTO_SIZE_BYTES) {
+  if (file.size > maxSizeBytes) {
     return {
       valid: false,
-      error: 'File size exceeds 5MB limit. Please select a smaller photo.',
+      error: sizeError,
     }
   }
 
   return { valid: true }
+}
+
+/**
+ * Validates a photo file for complaint attachment.
+ * - Must be within 5MB limit
+ * - Must be image/jpeg or image/png format
+ *
+ * @param {File} file
+ * @returns {{ valid: boolean, error?: string }}
+ */
+export function validateComplaintPhoto(file) {
+  return validateImageFile(file, {
+    maxSizeBytes: MAX_PHOTO_SIZE_BYTES,
+    allowedTypes: ALLOWED_PHOTO_TYPES,
+    allowedExtensions: ['jpg', 'jpeg', 'png'],
+    formatError: 'Invalid file format. Only JPG and PNG images are supported.',
+    sizeError: 'File size exceeds 5MB limit. Please select a smaller photo.',
+  })
+}
+
+/**
+ * Validates a user profile photo file.
+ * - Must be within 2MB limit
+ * - Must be PNG, JPEG, or WebP format
+ *
+ * @param {File} file
+ * @returns {{ valid: boolean, error?: string }}
+ */
+export function validateProfilePhoto(file) {
+  return validateImageFile(file, {
+    maxSizeBytes: MAX_PROFILE_PHOTO_SIZE_BYTES,
+    allowedTypes: ALLOWED_PROFILE_PHOTO_TYPES,
+    allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
+    formatError:
+      'Invalid file format. Only PNG, JPEG, and WebP images are supported.',
+    sizeError: 'File size exceeds 2MB limit. Please select a smaller photo.',
+  })
 }
 
 /**
@@ -121,6 +161,69 @@ function readFileAsDataURL(file) {
   })
 }
 
+function resolveImageContentType(file) {
+  if (file?.type) return file.type
+  const ext = (file?.name || '').split('.').pop()?.toLowerCase()
+  if (ext === 'png') return 'image/png'
+  if (ext === 'webp') return 'image/webp'
+  return 'image/jpeg'
+}
+
+async function uploadImageWithDevFallback(
+  file,
+  storagePath,
+  cleanFilename,
+  customStorage = storage
+) {
+  // Dev fixture mode: stub upload with data URL so frontend UI/state testing is unblocked.
+  // In automated test runs (MODE === 'test'), do not bypass when custom test storage is passed.
+  const isDevFixture =
+    import.meta.env.VITE_MOCK_STORAGE === 'true' &&
+    (import.meta.env.MODE !== 'test' || customStorage === storage || !customStorage)
+
+  if (isDevFixture) {
+    const downloadUrl = await readFileAsDataURL(file)
+    return {
+      downloadUrl,
+      path: storagePath,
+      filename: cleanFilename,
+    }
+  }
+
+  try {
+    const storageRef = ref(customStorage, storagePath)
+    await uploadBytes(storageRef, file, {
+      contentType: resolveImageContentType(file),
+    })
+
+    const downloadUrl = await getDownloadURL(storageRef)
+
+    return {
+      downloadUrl,
+      path: storagePath,
+      filename: cleanFilename,
+    }
+  } catch (err) {
+    if (
+      import.meta.env.DEV &&
+      import.meta.env.MODE !== 'test' &&
+      import.meta.env.VITE_USE_EMULATORS !== 'true'
+    ) {
+      console.warn(
+        'Firebase Storage upload failed; falling back to dev fixture data URL so UI flow is unblocked:',
+        err
+      )
+      const downloadUrl = await readFileAsDataURL(file)
+      return {
+        downloadUrl,
+        path: storagePath,
+        filename: cleanFilename,
+      }
+    }
+    throw err
+  }
+}
+
 /**
  * Uploads a complaint photo to Firebase Cloud Storage.
  * Path: complaint-photos/{complaintId}/{filename}
@@ -146,53 +249,33 @@ export async function uploadComplaintPhoto(file, complaintId, customStorage = st
   const cleanFilename = sanitizeFilename(file.name)
   const storagePath = `complaint-photos/${complaintId}/${cleanFilename}`
 
-  // Dev fixture mode: stub upload with data URL so frontend UI/state testing is unblocked.
-  // In automated test runs (MODE === 'test'), do not bypass when custom test storage is passed.
-  const isDevFixture =
-    import.meta.env.VITE_MOCK_STORAGE === 'true' &&
-    (import.meta.env.MODE !== 'test' || customStorage === storage || !customStorage)
+  return uploadImageWithDevFallback(file, storagePath, cleanFilename, customStorage)
+}
 
-  if (isDevFixture) {
-    const downloadUrl = await readFileAsDataURL(file)
-    return {
-      downloadUrl,
-      path: storagePath,
-      filename: cleanFilename,
-    }
+/**
+ * Uploads a user's profile photo to Firebase Cloud Storage.
+ * Path: profile-photos/{userId}/{timestamp}-{filename}
+ *
+ * @param {File} file
+ * @param {string} userId
+ * @param {object} [customStorage] - Optional storage instance for testing
+ * @returns {Promise<{ downloadUrl: string, path: string, filename: string }>}
+ */
+export async function uploadProfilePhoto(file, userId, customStorage = storage) {
+  if (!userId) {
+    throw new Error('A valid user ID is required for profile photo upload.')
   }
 
-  try {
-    const storageRef = ref(customStorage, storagePath)
-    await uploadBytes(storageRef, file, {
-      contentType: file.type || 'image/jpeg',
-    })
-
-    const downloadUrl = await getDownloadURL(storageRef)
-
-    return {
-      downloadUrl,
-      path: storagePath,
-      filename: cleanFilename,
-    }
-  } catch (err) {
-    if (
-      import.meta.env.DEV &&
-      import.meta.env.MODE !== 'test' &&
-      import.meta.env.VITE_USE_EMULATORS !== 'true'
-    ) {
-      console.warn(
-        'Firebase Storage upload failed; falling back to dev fixture data URL so filing is unblocked:',
-        err
-      )
-      const downloadUrl = await readFileAsDataURL(file)
-      return {
-        downloadUrl,
-        path: storagePath,
-        filename: cleanFilename,
-      }
-    }
-    throw err
+  const validation = validateProfilePhoto(file)
+  if (!validation.valid) {
+    throw new Error(validation.error)
   }
+
+  const cleanFilename = sanitizeFilename(file.name)
+  const uniqueFilename = `${Date.now()}-${cleanFilename}`
+  const storagePath = `profile-photos/${userId}/${uniqueFilename}`
+
+  return uploadImageWithDevFallback(file, storagePath, uniqueFilename, customStorage)
 }
 
 // ============================================================
